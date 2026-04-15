@@ -1,59 +1,81 @@
-Resolution Manager
+🎯 Resolution Manager Pro
 
-Aplicación ligera para Windows diseñada para optimizar la experiencia de juego mediante el cambio automático de resolución y frecuencia de actualización (Hz) al detectar procesos específicos.
+Resolution Manager es una utilidad avanzada para Windows diseñada para optimizar el rendimiento y la experiencia visual en juegos. Cambia automáticamente la resolución de pantalla y la frecuencia de actualización (Hz) al detectar procesos específicos, restaurando la configuración original al cerrar el juego o perder el foco.
 
-Características Principales
+🚀 Características Principales
 
-Detección Automática: Cambia la configuración de pantalla al iniciar un juego y la restaura instantáneamente al cerrarlo.
+Cambio Automático (Zero-Touch): Detecta cuando abres un juego y aplica la resolución/Hz configurados al instante.
 
-Control de Frecuencia (Hz): Permite definir los Hz específicos para cada juego, evitando que el sistema regrese a los 60Hz por defecto.
+🛡️ Modo Focus (Inteligente): Si activas esta opción, la resolución personalizada solo se mantendrá mientras el juego sea la ventana activa. Si haces Alt+Tab para ir al escritorio o navegador, la resolución se restaura automáticamente para tu comodidad.
 
-Forzado de Señal Física: Implementa lógica para intentar forzar el modo nativo del monitor, buscando reducir el escalado por software (GPU Scaling).
+⚡ Prioridad de Tiempo Real: El proceso se ejecuta con prioridad crítica en el sistema (RealTime Priority) para garantizar que la transición de resolución sea inmediata y sin lag.
 
-Gestión Inteligente: Soporta nombres de procesos con espacios y permite tener múltiples configuraciones guardadas.
+🎨 Iconos de Estado Dinámicos: El icono en la bandeja del sistema (System Tray) cambia de color según el estado:
 
-Modo Segundo Plano: Se minimiza a la bandeja del sistema (System Tray) para no interferir con el escritorio.
+🔵 Azul: Sistema activo esperando un juego.
 
-Interruptor de Control: Botón de Activar/Desactivar para pausar el monitoreo sin cerrar la aplicación.
+🟢 Verde: Juego detectado y resolución aplicada.
 
-Requisitos
+🟠 Naranja: Juego abierto pero minimizado (Resolución restaurada).
 
-Windows 10 / 11.
+🔴 Rojo: Sistema pausado.
 
-.NET Framework 4.7.2 o superior.
+📉 Ultra Optimizado: Uso de RAM y CPU insignificante. Los iconos se generan en memoria y la lógica de monitoreo evita llamadas redundantes al driver de video.
 
-Permisos de Administrador: Necesarios para interactuar con las APIs de cambio de resolución de Windows (user32.dll).
+🖥️ Soporte de Aspect Ratio: Selectores rápidos para ratios 4:3, 16:9, 16:10, 21:9 y 5:4 con las resoluciones más competitivas del mercado.
 
-Instalación
+🛠️ Requisitos del Sistema
 
-Descarga el ejecutable desde la sección Releases.
+SO: Windows 10 o 11 (64 bits recomendado).
 
-Ejecuta la aplicación como administrador.
+Framework: .NET Framework 4.7.2 o superior.
 
-Uso
+Permisos: Se recomienda ejecutar como Administrador para permitir el cambio de prioridad de proceso y la manipulación de la resolución sin restricciones.
 
-Agregar Juego: Escribe el nombre del proceso (ej: VALORANT-Win64-Shipping o Risk of Rain 2) sin la extensión .exe.
+📥 Instalación
 
-Configurar Pantalla: Define el ancho, alto y los Hz deseados.
+Ve a la sección de Releases.
 
-Guardar: Haz clic en "Agregar". La configuración se guardará automáticamente en un archivo config.json.
+Descarga el archivo ResolutionManager.exe.
 
-Minimizar: Al minimizar la ventana, el programa seguirá trabajando desde la barra de tareas.
+Colócalo en la carpeta de tu preferencia.
 
-Restauración: Al cerrar el juego, el monitor volverá a su configuración original de escritorio.
+(Opcional) Crea un acceso directo en tu carpeta de Inicio para que arranque con Windows.
 
-Notas Técnicas
+📖 Modo de Uso
 
-El programa utiliza EnumDisplaySettings para encontrar modos compatibles reportados por el driver de video.
+Añadir un juego: Escribe el nombre del proceso (ej: cs2, Valorant, Overwatch) sin el .exe.
 
-Para evitar el escalado, se intenta aplicar el flag DMDFO_DEFAULT en la estructura DEVMODE.
+Configurar: Selecciona el Ratio de aspecto, la resolución deseada y los Hz de tu monitor.
 
-Si una resolución/frecuencia no es soportada por el monitor, el cambio no se aplicará para proteger el hardware.
+Guardar: Haz clic en Agregar. El juego aparecerá en la lista y se guardará en config.json.
 
-Contribuir
+Editar: Haz clic sobre un juego en la lista para cargar sus datos, modifícalos y pulsa Actualizar.
 
-Si encuentras algún error o tienes ideas para mejorar el forzado de señal física, ¡siéntete libre de abrir un issue o enviar un pull request!
+Focus: Marca la casilla Modo Focus si quieres que la resolución solo cambie cuando estés dentro del juego.
 
-Autor
+🛠️ Tecnologías Utilizadas
 
-Desarrollado por Breniak.
+Lenguaje: C#
+
+Interfaz: WinForms con diseño Modern Dark.
+
+API Nativa: Interoperabilidad con user32.dll para gestión de ventanas y configuraciones de pantalla.
+
+Serialización: System.Text.Json para una configuración ligera.
+
+📝 Contribuir
+
+¿Tienes ideas para mejorar el escalado o la detección de procesos?
+
+Haz un Fork del proyecto.
+
+Crea una rama para tu mejora (git checkout -b feature/MejoraIncreible).
+
+Envía un Pull Request.
+
+👤 Autor
+
+Desarrollado con ❤️ por Breniak.
+
+¿Te sirvió el programa? ¡No olvides dejar una ⭐ en el repositorio!
