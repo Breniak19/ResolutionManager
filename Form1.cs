@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.IO;
+using Microsoft.Win32; // Necesario para Iniciar con Windows
 
 namespace ResolutionManager
 {
@@ -26,10 +27,17 @@ namespace ResolutionManager
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+        // --- API PARA MOVER LA VENTANA SIN BORDES ---
+        public const int WM_NCLBUTTONDOWN = 0xA1;
+        public const int HT_CAPTION = 0x2;
+        [DllImport("user32.dll")]
+        public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+        [DllImport("user32.dll")]
+        public static extern bool ReleaseCapture();
+
         private const int ENUM_CURRENT_SETTINGS = -1;
         private const int CDS_UPDATEREGISTRY = 0x01;
         private const int DISP_CHANGE_SUCCESSFUL = 0;
-
         private const int DM_PELSWIDTH = 0x00080000;
         private const int DM_PELSHEIGHT = 0x00100000;
         private const int DM_DISPLAYFREQUENCY = 0x00400000;
@@ -39,48 +47,31 @@ namespace ResolutionManager
         [StructLayout(LayoutKind.Sequential)]
         private struct DEVMODE
         {
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-            public string dmDeviceName;
-            public short dmSpecVersion;
-            public short dmDriverVersion;
-            public short dmSize;
-            public short dmDriverExtra;
-            public int dmFields;
-            public int dmPositionX;
-            public int dmPositionY;
-            public int dmDisplayOrientation;
-            public int dmDisplayFixedOutput;
-            public short dmColor;
-            public short dmDuplex;
-            public short dmYResolution;
-            public short dmTTOption;
-            public short dmCollate;
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-            public string dmFormName;
-            public short dmLogPixels;
-            public int dmBitsPerPel;
-            public int dmPelsWidth;
-            public int dmPelsHeight;
-            public int dmDisplayFlags;
-            public int dmDisplayFrequency;
-            public int dmICMMethod;
-            public int dmICMIntent;
-            public int dmMediaType;
-            public int dmDitherType;
-            public int dmReserved1;
-            public int dmReserved2;
-            public int dmPanningWidth;
-            public int dmPanningHeight;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+            public short dmSpecVersion; public short dmDriverVersion; public short dmSize;
+            public short dmDriverExtra; public int dmFields; public int dmPositionX;
+            public int dmPositionY; public int dmDisplayOrientation; public int dmDisplayFixedOutput;
+            public short dmColor; public short dmDuplex; public short dmYResolution;
+            public short dmTTOption; public short dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+            public short dmLogPixels; public int dmBitsPerPel; public int dmPelsWidth;
+            public int dmPelsHeight; public int dmDisplayFlags; public int dmDisplayFrequency;
+            public int dmICMMethod; public int dmICMIntent; public int dmMediaType;
+            public int dmDitherType; public int dmReserved1; public int dmReserved2;
+            public int dmPanningWidth; public int dmPanningHeight;
         }
 
         private DEVMODE originalMode;
         private Timer monitorTimer;
         private Dictionary<string, GameConfig> procesosMonitoreados;
+        private AppSettings configuracionApp; // Nueva clase para ajustes globales
+
         private const string ConfigFile = "config.json";
-        private const string SettingsFile = "settings.json";
+        private const string SettingsFile = "appsettings.json";
 
         private string procesoActualActivo = "";
-        private bool resolucionActualModificada = false; // Optimización de RAM y CPU
+        private bool resolucionActualModificada = false;
+        private bool isFirstShow = true; // Para el inicio minimizado sigiloso
 
         // --- ICONOS DINÁMICOS EN MEMORIA ---
         private Icon iconEstado1_Idle;
@@ -99,16 +90,18 @@ namespace ResolutionManager
 
         public Form1()
         {
-            EstablecerPrioridadTiempoReal(); // Asignar máxima prioridad de CPU al iniciar
-            GenerarIconosOptimizados(); // Generar en memoria para no usar archivos locales
+            EstablecerPrioridadTiempoReal();
+            GenerarIconosOptimizados();
 
             InitializeComponent();
-            ApplyModernTheme();
+            SetupCustomUI();
             SetupControls();
             ConfigureTrayIcon();
 
             procesosMonitoreados = new Dictionary<string, GameConfig>();
-            monitorTimer = new Timer { Interval = 1500 }; // Más rápido ya que está muy optimizado
+            configuracionApp = new AppSettings();
+
+            monitorTimer = new Timer { Interval = 1500 };
             monitorTimer.Tick += MonitorTimer_Tick;
 
             LoadConfig();
@@ -118,35 +111,36 @@ namespace ResolutionManager
             EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref originalMode);
         }
 
+        // --- TRUCO PARA INICIAR MINIMIZADO SIN PARPADEOS ---
+        protected override void SetVisibleCore(bool value)
+        {
+            if (isFirstShow && configuracionApp != null && configuracionApp.StartMinimized)
+            {
+                value = false;
+                if (!this.IsHandleCreated) CreateHandle();
+            }
+            base.SetVisibleCore(value);
+            isFirstShow = false;
+        }
+
         private void EstablecerPrioridadTiempoReal()
         {
             try
             {
-                using (Process p = Process.GetCurrentProcess())
-                {
-                    p.PriorityClass = ProcessPriorityClass.RealTime; // Prioridad Máxima
-                }
+                using (Process p = Process.GetCurrentProcess()) { p.PriorityClass = ProcessPriorityClass.RealTime; }
             }
             catch
             {
-                try
-                {
-                    using (Process p = Process.GetCurrentProcess())
-                    {
-                        p.PriorityClass = ProcessPriorityClass.High; // Fallback
-                    }
-                }
-                catch { } // Silencioso si falta permisos de admin
+                try { using (Process p = Process.GetCurrentProcess()) { p.PriorityClass = ProcessPriorityClass.High; } } catch { }
             }
         }
 
         private void GenerarIconosOptimizados()
         {
-            // Creamos los iconos una vez y los guardamos en memoria para no llenar la RAM
-            iconEstado1_Idle = CrearIconoCirculo(Color.DodgerBlue); // Esperando
-            iconEstado2_Activo = CrearIconoCirculo(Color.LimeGreen); // Focus/Cambiado
-            iconEstado3_FocoPerdido = CrearIconoCirculo(Color.Orange); // Minimizaste
-            iconEstado0_Desactivado = CrearIconoCirculo(Color.Red); // Pausado
+            iconEstado1_Idle = CrearIconoCirculo(Color.DodgerBlue);
+            iconEstado2_Activo = CrearIconoCirculo(Color.LimeGreen);
+            iconEstado3_FocoPerdido = CrearIconoCirculo(Color.Orange);
+            iconEstado0_Desactivado = CrearIconoCirculo(Color.FromArgb(229, 57, 53)); // Rojo Acento
         }
 
         private Icon CrearIconoCirculo(Color color)
@@ -156,14 +150,8 @@ namespace ResolutionManager
             {
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 g.Clear(Color.Transparent);
-                using (Brush b = new SolidBrush(color))
-                {
-                    g.FillEllipse(b, 2, 2, 12, 12);
-                }
-                using (Pen p = new Pen(Color.White, 1))
-                {
-                    g.DrawEllipse(p, 2, 2, 12, 12);
-                }
+                using (Brush b = new SolidBrush(color)) { g.FillEllipse(b, 2, 2, 12, 12); }
+                using (Pen p = new Pen(Color.White, 1)) { g.DrawEllipse(p, 2, 2, 12, 12); }
             }
             return Icon.FromHandle(bmp.GetHicon());
         }
@@ -186,41 +174,34 @@ namespace ResolutionManager
                     if (trayIcon.Icon != iconEstado1_Idle)
                     {
                         trayIcon.Icon = iconEstado1_Idle;
-                        trayIcon.Text = "Esperando juego...";
+                        trayIcon.Text = "RM Pro: Esperando juego...";
                     }
                     break;
                 case 2:
                     if (trayIcon.Icon != iconEstado2_Activo)
                     {
                         trayIcon.Icon = iconEstado2_Activo;
-                        trayIcon.Text = "¡Juego en Focus! Resolución aplicada.";
+                        trayIcon.Text = "RM Pro: ¡Juego en Focus! Resolución aplicada.";
                     }
                     break;
                 case 3:
                     if (trayIcon.Icon != iconEstado3_FocoPerdido)
                     {
                         trayIcon.Icon = iconEstado3_FocoPerdido;
-                        trayIcon.Text = "Juego minimizado (Resolución de escritorio).";
+                        trayIcon.Text = "RM Pro: Juego minimizado (Resolución normal).";
                     }
                     break;
             }
         }
 
-        private void ApplyModernTheme()
+        private void SetupCustomUI()
         {
-            this.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-            this.BackColor = Color.FromArgb(28, 28, 28);
-            this.ForeColor = Color.White;
-
-            toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 5000;
-            toolTip.InitialDelay = 500;
-            toolTip.ReshowDelay = 500;
-            toolTip.ShowAlways = true;
-
+            toolTip = new ToolTip { AutoPopDelay = 5000, InitialDelay = 500, ReshowDelay = 500, ShowAlways = true };
             toolTip.SetToolTip(btnAgregar, "Guarda o actualiza la configuración.");
-            toolTip.SetToolTip(btnActivarDesactivar, "Pausa o reanuda el sistema.");
-            toolTip.SetToolTip(chkFocusMode, "Si sales de la ventana del juego (Alt+Tab), la resolución volverá a la normalidad automáticamente.");
+            toolTip.SetToolTip(btnActivarDesactivar, "Pausa o reanuda el sistema global.");
+
+            pnlTabGames.BringToFront(); // Pestaña inicial
+            ActualizarBotonNavegacion(btnNavGames);
         }
 
         private void SetupControls()
@@ -230,11 +211,47 @@ namespace ResolutionManager
             numHz.Minimum = 30; numHz.Maximum = 500; numHz.Value = 60;
 
             cmbAspectRatio.Items.Clear();
-            cmbAspectRatio.Items.Add("Ninguna (Manual)");
+            cmbAspectRatio.Items.Add("Manual");
             foreach (var key in resolucionesPorAspecto.Keys) cmbAspectRatio.Items.Add(key);
             cmbAspectRatio.SelectedIndex = 0;
 
             lstProcesos.SelectedIndexChanged += lstProcesos_SelectedIndexChanged;
+        }
+
+        // --- NAVEGACIÓN Y ARRASTRE DE VENTANA ---
+        private void pnlTitleBar_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ReleaseCapture();
+                SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
+            }
+        }
+
+        private void btnClose_Click(object sender, EventArgs e) { this.Close(); } // Cierra a la bandeja
+        private void btnMinimize_Click(object sender, EventArgs e) { this.WindowState = FormWindowState.Minimized; }
+
+        private void btnNavGames_Click(object sender, EventArgs e)
+        {
+            pnlTabGames.BringToFront();
+            ActualizarBotonNavegacion(btnNavGames);
+        }
+
+        private void btnNavSettings_Click(object sender, EventArgs e)
+        {
+            pnlTabSettings.BringToFront();
+            ActualizarBotonNavegacion(btnNavSettings);
+        }
+
+        private void ActualizarBotonNavegacion(Button btnActivo)
+        {
+            btnNavGames.BackColor = Color.FromArgb(15, 15, 19);
+            btnNavSettings.BackColor = Color.FromArgb(15, 15, 19);
+            btnNavGames.ForeColor = Color.Gray;
+            btnNavSettings.ForeColor = Color.Gray;
+
+            btnActivo.BackColor = Color.FromArgb(22, 22, 26);
+            btnActivo.ForeColor = Color.White;
         }
 
         private void LimpiarCampos()
@@ -247,27 +264,19 @@ namespace ResolutionManager
             txtNombreProceso.ForeColor = Color.Gray;
 
             cmbAspectRatio.SelectedIndex = 0;
-            numAncho.Value = 1920;
-            numAlto.Value = 1080;
-            numHz.Value = 60;
+            numAncho.Value = 1920; numAlto.Value = 1080; numHz.Value = 60;
 
             btnAgregar.Text = "Agregar";
-            btnAgregar.ForeColor = Color.Lime;
+            btnAgregar.BackColor = Color.FromArgb(229, 57, 53); // Rojo Acento
             this.ActiveControl = null;
         }
 
-        private void Form1_Click(object sender, EventArgs e)
-        {
-            LimpiarCampos();
-        }
+        private void pnlContent_Click(object sender, EventArgs e) { LimpiarCampos(); }
+        private void pnlTabGames_Click(object sender, EventArgs e) { LimpiarCampos(); }
 
         private void lstProcesos_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (lstProcesos.SelectedIndex == -1)
-            {
-                LimpiarCampos();
-                return;
-            }
+            if (lstProcesos.SelectedIndex == -1) { LimpiarCampos(); return; }
 
             string selectedText = lstProcesos.SelectedItem.ToString();
             int lastParen = selectedText.LastIndexOf(" (");
@@ -280,12 +289,10 @@ namespace ResolutionManager
                 txtNombreProceso.ForeColor = Color.White;
 
                 cmbAspectRatio.SelectedIndex = 0;
-                numAncho.Value = config.Width;
-                numAlto.Value = config.Height;
-                numHz.Value = config.RefreshRate;
+                numAncho.Value = config.Width; numAlto.Value = config.Height; numHz.Value = config.RefreshRate;
 
                 btnAgregar.Text = "Actualizar";
-                btnAgregar.ForeColor = Color.Cyan;
+                btnAgregar.BackColor = Color.FromArgb(43, 144, 217); // Azul para editar
             }
         }
 
@@ -294,21 +301,14 @@ namespace ResolutionManager
             string seleccionado = cmbAspectRatio.SelectedItem.ToString();
             cmbResoluciones.Items.Clear();
 
-            if (seleccionado.StartsWith("Ninguna"))
+            if (seleccionado.StartsWith("Manual"))
             {
-                cmbResoluciones.Enabled = false;
-                numAncho.Enabled = true;
-                numAlto.Enabled = true;
+                cmbResoluciones.Enabled = false; numAncho.Enabled = true; numAlto.Enabled = true;
             }
             else
             {
-                cmbResoluciones.Enabled = true;
-                numAncho.Enabled = false;
-                numAlto.Enabled = false;
-                foreach (var res in resolucionesPorAspecto[seleccionado])
-                {
-                    cmbResoluciones.Items.Add(res);
-                }
+                cmbResoluciones.Enabled = true; numAncho.Enabled = false; numAlto.Enabled = false;
+                foreach (var res in resolucionesPorAspecto[seleccionado]) cmbResoluciones.Items.Add(res);
                 if (cmbResoluciones.Items.Count > 0) cmbResoluciones.SelectedIndex = 0;
             }
         }
@@ -317,19 +317,15 @@ namespace ResolutionManager
         {
             if (cmbResoluciones.SelectedIndex == -1) return;
             string[] partes = cmbResoluciones.SelectedItem.ToString().Split('x');
-            if (partes.Length == 2)
-            {
-                numAncho.Value = int.Parse(partes[0]);
-                numAlto.Value = int.Parse(partes[1]);
-            }
+            if (partes.Length == 2) { numAncho.Value = int.Parse(partes[0]); numAlto.Value = int.Parse(partes[1]); }
         }
 
         private void ConfigureTrayIcon()
         {
             trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("Mostrar", null, (s, e) => ShowMainWindow());
+            trayMenu.Items.Add("Mostrar Panel", null, (s, e) => ShowMainWindow());
             trayMenu.Items.Add(new ToolStripSeparator());
-            trayMenu.Items.Add("Salir", null, (s, e) => ExitApplication());
+            trayMenu.Items.Add("Salir Completamente", null, (s, e) => ExitApplication());
 
             trayIcon.Icon = iconEstado1_Idle;
             trayIcon.Text = "Resolution Manager Pro";
@@ -343,6 +339,8 @@ namespace ResolutionManager
             this.Show();
             this.WindowState = FormWindowState.Normal;
             this.ShowInTaskbar = true;
+            this.BringToFront();
+            this.Activate();
         }
 
         private void ExitApplication()
@@ -357,7 +355,7 @@ namespace ResolutionManager
         {
             try
             {
-                // Cargar Configuración de Juegos
+                // Cargar Juegos
                 if (File.Exists(ConfigFile))
                 {
                     string json = File.ReadAllText(ConfigFile);
@@ -366,61 +364,77 @@ namespace ResolutionManager
                     if (procesosMonitoreados.Count > 0) monitorTimer.Start();
                 }
 
-                // Cargar Configuración del Botón Focus
+                // Cargar Ajustes Globales
                 if (File.Exists(SettingsFile))
                 {
-                    string txt = File.ReadAllText(SettingsFile);
-                    chkFocusMode.Checked = txt.Contains("true");
+                    string jsonSettings = File.ReadAllText(SettingsFile);
+                    configuracionApp = JsonSerializer.Deserialize<AppSettings>(jsonSettings) ?? new AppSettings();
                 }
+
+                // Aplicar configuraciones a la UI y al sistema
+                chkFocusMode.Checked = configuracionApp.FocusMode;
+                chkTopMost.Checked = configuracionApp.TopMost;
+                chkStartMinimized.Checked = configuracionApp.StartMinimized;
+                chkStartWithWindows.Checked = configuracionApp.StartWithWindows;
+
+                this.TopMost = configuracionApp.TopMost;
             }
-            catch { procesosMonitoreados = new Dictionary<string, GameConfig>(); }
+            catch { procesosMonitoreados = new Dictionary<string, GameConfig>(); configuracionApp = new AppSettings(); }
         }
 
         private void SaveConfig()
         {
             try
             {
-                string json = JsonSerializer.Serialize(procesosMonitoreados);
-                File.WriteAllText(ConfigFile, json);
+                File.WriteAllText(ConfigFile, JsonSerializer.Serialize(procesosMonitoreados));
 
-                // Guardar preferencia del Botón Focus
-                File.WriteAllText(SettingsFile, chkFocusMode.Checked ? "true" : "false");
+                configuracionApp.FocusMode = chkFocusMode.Checked;
+                configuracionApp.TopMost = chkTopMost.Checked;
+                configuracionApp.StartMinimized = chkStartMinimized.Checked;
+                configuracionApp.StartWithWindows = chkStartWithWindows.Checked;
+
+                File.WriteAllText(SettingsFile, JsonSerializer.Serialize(configuracionApp));
             }
             catch (Exception ex) { Debug.WriteLine("Error al guardar: " + ex.Message); }
+        }
+
+        // --- SISTEMA DE INICIO CON WINDOWS (Vía Regedit - Seguro) ---
+        private void ConfigurarInicioConWindows(bool activar)
+        {
+            try
+            {
+                string runKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(runKey, true))
+                {
+                    if (activar) key.SetValue("ResolutionManagerPro", Application.ExecutablePath);
+                    else key.DeleteValue("ResolutionManagerPro", false);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine("Error de registro: " + ex.Message); }
+        }
+
+        private void chkSetting_CheckedChanged(object sender, EventArgs e)
+        {
+            this.TopMost = chkTopMost.Checked;
+            ConfigurarInicioConWindows(chkStartWithWindows.Checked);
+            SaveConfig();
         }
 
         private void ActualizarListaVisual()
         {
             lstProcesos.Items.Clear();
             foreach (var item in procesosMonitoreados)
-            {
                 lstProcesos.Items.Add($"{item.Key} ({item.Value.Width}x{item.Value.Height} @ {item.Value.RefreshRate}Hz)");
-            }
         }
 
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            if (WindowState == FormWindowState.Minimized)
-            {
-                this.Hide();
-                this.ShowInTaskbar = false;
-            }
-        }
-
-        // --- NÚCLEO OPTIMIZADO (Sin fugas de RAM) ---
+        // --- NÚCLEO OPTIMIZADO ---
         private void MonitorTimer_Tick(object sender, EventArgs e)
         {
-            if (!programaActivo)
-            {
-                ActualizarIconoBandeja(0);
-                return;
-            }
+            if (!programaActivo) { ActualizarIconoBandeja(0); return; }
 
             string procesoDetectado = "";
             bool juegoEnFocus = false;
 
-            // Obtener la ventana que el usuario está viendo actualmente
             IntPtr ventanaActual = GetForegroundWindow();
             GetWindowThreadProcessId(ventanaActual, out uint processIdFoco);
 
@@ -430,15 +444,9 @@ namespace ResolutionManager
                 if (procesos.Length > 0)
                 {
                     procesoDetectado = proceso;
-
-                    // Verificar si ese juego es el que tiene el Focus
                     foreach (var p in procesos)
                     {
-                        if (p.Id == processIdFoco)
-                        {
-                            juegoEnFocus = true;
-                            break;
-                        }
+                        if (p.Id == processIdFoco) { juegoEnFocus = true; break; }
                     }
                     break;
                 }
@@ -449,7 +457,6 @@ namespace ResolutionManager
 
             if (debeAplicarResolucion)
             {
-                // ESTADO 2: Activo (o Focus)
                 if (!resolucionActualModificada || procesoActualActivo != procesoDetectado)
                 {
                     var config = procesosMonitoreados[procesoDetectado];
@@ -461,18 +468,15 @@ namespace ResolutionManager
             }
             else if (!string.IsNullOrEmpty(procesoDetectado))
             {
-                // ESTADO 3: Juego Abierto, pero perdiste el Focus
                 if (resolucionActualModificada)
                 {
                     RestaurarResolucionOriginal();
                     resolucionActualModificada = false;
-                    // Mantenemos procesoActualActivo para no olvidar qué juego es
                 }
                 ActualizarIconoBandeja(3);
             }
             else
             {
-                // ESTADO 1: Nada abierto
                 if (resolucionActualModificada)
                 {
                     RestaurarResolucionOriginal();
@@ -487,26 +491,19 @@ namespace ResolutionManager
         {
             try
             {
-                DEVMODE dm = new DEVMODE();
-                dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+                DEVMODE dm = new DEVMODE(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
                 bool modoEncontrado = false;
-
                 for (int i = 0; EnumDisplaySettings(null, i, ref dm); i++)
                 {
                     if (dm.dmPelsWidth == ancho && dm.dmPelsHeight == alto && dm.dmDisplayFrequency == hz)
-                    {
-                        modoEncontrado = true;
-                        break;
-                    }
+                    { modoEncontrado = true; break; }
                 }
 
                 if (modoEncontrado)
                 {
                     dm.dmFields |= DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYFIXEDOUTPUT;
                     dm.dmDisplayFixedOutput = DMDFO_DEFAULT;
-
-                    int result = ChangeDisplaySettings(ref dm, CDS_UPDATEREGISTRY);
-                    if (result != DISP_CHANGE_SUCCESSFUL)
+                    if (ChangeDisplaySettings(ref dm, CDS_UPDATEREGISTRY) != DISP_CHANGE_SUCCESSFUL)
                     {
                         dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
                         ChangeDisplaySettings(ref dm, CDS_UPDATEREGISTRY);
@@ -514,12 +511,9 @@ namespace ResolutionManager
                 }
                 else
                 {
-                    DEVMODE dmManual = new DEVMODE();
-                    dmManual.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+                    DEVMODE dmManual = new DEVMODE(); dmManual.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
                     EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref dmManual);
-                    dmManual.dmPelsWidth = ancho;
-                    dmManual.dmPelsHeight = alto;
-                    dmManual.dmDisplayFrequency = hz;
+                    dmManual.dmPelsWidth = ancho; dmManual.dmPelsHeight = alto; dmManual.dmDisplayFrequency = hz;
                     dmManual.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYFIXEDOUTPUT;
                     dmManual.dmDisplayFixedOutput = DMDFO_DEFAULT;
                     ChangeDisplaySettings(ref dmManual, CDS_UPDATEREGISTRY);
@@ -530,8 +524,7 @@ namespace ResolutionManager
 
         private void RestaurarResolucionOriginal()
         {
-            try { ChangeDisplaySettings(ref originalMode, CDS_UPDATEREGISTRY); }
-            catch (Exception ex) { Debug.WriteLine(ex.Message); }
+            try { ChangeDisplaySettings(ref originalMode, CDS_UPDATEREGISTRY); } catch (Exception) { }
         }
 
         private void btnAgregar_Click(object sender, EventArgs e)
@@ -539,31 +532,17 @@ namespace ResolutionManager
             string nombre = txtNombreProceso.Text.Trim();
             if (string.IsNullOrEmpty(nombre) || nombre == "proceso") return;
 
-            var config = new GameConfig
-            {
-                Width = (int)numAncho.Value,
-                Height = (int)numAlto.Value,
-                RefreshRate = (int)numHz.Value
-            };
+            var config = new GameConfig { Width = (int)numAncho.Value, Height = (int)numAlto.Value, RefreshRate = (int)numHz.Value };
 
-            if (procesosMonitoreados.ContainsKey(nombre))
-            {
-                procesosMonitoreados[nombre] = config;
-            }
-            else
-            {
-                procesosMonitoreados.Add(nombre, config);
-            }
+            if (procesosMonitoreados.ContainsKey(nombre)) procesosMonitoreados[nombre] = config;
+            else procesosMonitoreados.Add(nombre, config);
 
             ActualizarListaVisual();
             SaveConfig();
 
             if (!monitorTimer.Enabled) monitorTimer.Start();
-
             if (procesoActualActivo == nombre && (!chkFocusMode.Checked))
-            {
                 CambiarResolucion(config.Width, config.Height, config.RefreshRate);
-            }
 
             LimpiarCampos();
         }
@@ -572,15 +551,13 @@ namespace ResolutionManager
         {
             if (lstProcesos.SelectedIndex == -1) return;
             string selectedText = lstProcesos.SelectedItem.ToString();
-            int lastParen = selectedText.LastIndexOf(" (");
-            string nombreProceso = lastParen != -1 ? selectedText.Substring(0, lastParen) : selectedText;
+            string nombreProceso = selectedText.Contains(" (") ? selectedText.Substring(0, selectedText.LastIndexOf(" (")) : selectedText;
 
             if (procesosMonitoreados.ContainsKey(nombreProceso))
             {
                 procesosMonitoreados.Remove(nombreProceso);
                 ActualizarListaVisual();
                 SaveConfig();
-
                 LimpiarCampos();
 
                 if (procesosMonitoreados.Count == 0)
@@ -595,20 +572,20 @@ namespace ResolutionManager
         private void btnActivarDesactivar_Click(object sender, EventArgs e)
         {
             programaActivo = !programaActivo;
-            btnActivarDesactivar.Text = programaActivo ? "Sistema Activo" : "Sistema Pausado";
-            btnActivarDesactivar.BackColor = programaActivo ? Color.FromArgb(46, 139, 87) : Color.FromArgb(178, 34, 34);
-            procesoActualActivo = "";
-
-            if (!programaActivo)
+            if (programaActivo)
             {
+                btnActivarDesactivar.Text = "PAUSAR SISTEMA";
+                btnActivarDesactivar.BackColor = Color.FromArgb(229, 57, 53); // Rojo
+                btnActivarDesactivar.ForeColor = Color.White;
+            }
+            else
+            {
+                btnActivarDesactivar.Text = "SISTEMA PAUSADO";
+                btnActivarDesactivar.BackColor = Color.FromArgb(30, 30, 35); // Gris oscuro
+                btnActivarDesactivar.ForeColor = Color.Gray;
                 RestaurarResolucionOriginal();
                 ActualizarIconoBandeja(0);
             }
-        }
-
-        private void chkFocusMode_CheckedChanged(object sender, EventArgs e)
-        {
-            SaveConfig(); // Guardamos el estado al vuelo
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
@@ -618,26 +595,23 @@ namespace ResolutionManager
                 e.Cancel = true;
                 this.WindowState = FormWindowState.Minimized;
                 this.Hide();
+                this.ShowInTaskbar = false;
                 return;
             }
             RestaurarResolucionOriginal();
         }
 
-        private void txtNombreProceso_Enter(object sender, EventArgs e)
-        {
-            if (txtNombreProceso.Text == "proceso") { txtNombreProceso.Text = ""; txtNombreProceso.ForeColor = Color.White; }
-        }
-
-        private void txtNombreProceso_Leave(object sender, EventArgs e)
-        {
-            if (string.IsNullOrWhiteSpace(txtNombreProceso.Text)) { txtNombreProceso.Text = "proceso"; txtNombreProceso.ForeColor = Color.Gray; }
-        }
+        private void txtNombreProceso_Enter(object sender, EventArgs e) { if (txtNombreProceso.Text == "proceso") { txtNombreProceso.Text = ""; txtNombreProceso.ForeColor = Color.White; } }
+        private void txtNombreProceso_Leave(object sender, EventArgs e) { if (string.IsNullOrWhiteSpace(txtNombreProceso.Text)) { txtNombreProceso.Text = "proceso"; txtNombreProceso.ForeColor = Color.Gray; } }
     }
 
-    public class GameConfig
+    public class GameConfig { public int Width { get; set; } public int Height { get; set; } public int RefreshRate { get; set; } }
+
+    public class AppSettings
     {
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public int RefreshRate { get; set; }
+        public bool FocusMode { get; set; } = true;
+        public bool TopMost { get; set; } = false;
+        public bool StartMinimized { get; set; } = false;
+        public bool StartWithWindows { get; set; } = false;
     }
 }
